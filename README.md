@@ -22,13 +22,19 @@ before downloading or using this tool.
 ## Usage
 
 1. Create directory for RSS feed files
- * `mkdir ~/.rss`
+  ```
+  mkdir ~/.rss
+  ```
 2. Create configuration on whom to follow
- * `echo jack > ~/.rss/users.txt`
+  ```
+  echo jack > ~/.rss/users.txt
+  ```
 3. Run the tool
- * `tweets2rss -Y -Z`
+  ```
+  tweets2rss -Y -Z
+  ```
 4. Read the generated RSS feeds with your favorite RSS reader
- * Run a simple HTTP server if needed
+   (run a simple HTTP server if needed)
 
 ## Tips
 
