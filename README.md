@@ -21,19 +21,23 @@ before downloading or using this tool.
 
 ## Usage
 
-1. Create directory for RSS feed files
+1. Ensure twint is working as expected
+  ```
+  twint -u jack
+  ```
+2. Create directory for RSS feed files
   ```
   mkdir ~/.rss
   ```
-2. Create configuration on whom to follow
+3. Create configuration on whom to follow
   ```
   echo jack > ~/.rss/users.txt
   ```
-3. Run the tool
+4. Run the tool
   ```
   tweets2rss -Y -Z
   ```
-4. Read the generated RSS feeds with your favorite RSS reader
+5. Read the generated RSS feeds with your favorite RSS reader
    (run a simple HTTP server if needed)
 
 ## Tips
