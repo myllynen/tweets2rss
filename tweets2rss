@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+#
+# Copyright (C) 2020 Marko Myllynen <marko.myllynen@redhat.com>
+#
+# This program is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation; either version 2 of the License, or (at your
+# option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for more details.
+"""Tweets to RSS Tool"""
+
+# Fix -Y to exclude non-frontpage replies-to-self (several self-replies to others)
+
+from collections import OrderedDict
+from datetime import datetime
+
+import argparse
+import errno
+import sys
+import re
+import os
+
+import twint
+
+
+#
+# Constants, defaults, globals
+#
+ARGS = None
+USERS_FILE = "~/.rss/users.txt"
+RSS_BASE_PATH = "~/.rss/"
+
+
+#
+# Initialization functions
+#
+def valid_date(string):
+    """Validate date string format"""
+    try:
+        if ':' not in string:
+            string += " 00:00:00"
+        return datetime.strptime(string, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        sys.stderr.write("Not a valid date: '%s'.\n" % string)
+        sys.exit(1)
+
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="Tweets to RSS tool")
+    parser.add_argument("-d", "--display-limit", type=int,
+                        default=20,
+                        help="Maximum number of tweets to display, default: 20.")
+    parser.add_argument("-D", "--debug", action="store_true",
+                        default=False,
+                        help="Dump tweets to stdout instead of writing RSS.")
+    parser.add_argument("-e", "--end-date", type=valid_date,
+                        default=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        help="End date for scraping, default: <now>.")
+    parser.add_argument("-f", "--force-write", action="store_true",
+                        default=False,
+                        help="Force writing RSS even if no changes.")
+    parser.add_argument("-l", "--tweet-limit", type=int,
+                        default=60,
+                        help="Maximum number of tweets to gather, default: 60.")
+    parser.add_argument("-p", "--poolsize", type=int,
+                        default=3,
+                        help="Parallel processes to run, default: 3.")
+    parser.add_argument("-r", "--retries", type=int,
+                        default=3,
+                        help="Retry scraping count, default: 3.")
+    parser.add_argument("-s", "--start-date", type=valid_date,
+                        default="2020-01-01",
+                        help="Start date for scraping, default: '2020-01-01'.")
+    parser.add_argument("-u", "--users-file",
+                        default=USERS_FILE,
+                        help="File listing users to scrape, default: " + USERS_FILE)
+    parser.add_argument("-x", "--exclude-tweets", action="store_true",
+                        default=False,
+                        help="Exclude tweets, default: include.")
+    parser.add_argument("-X", "--exclude-replies", action="store_true",
+                        default=False,
+                        help="Exclude replies, default: include.")
+    parser.add_argument("-y", "--exclude-replies-self", action="store_true",
+                        default=False,
+                        help="Exclude replies to self, default: include.")
+    parser.add_argument("-Y", "--exclude-replies-others", action="store_true",
+                        default=False,
+                        help="Exclude replies to others, default: include.")
+    parser.add_argument("-z", "--exclude-retweets", action="store_true",
+                        default=False,
+                        help="Exclude retweets, default: include.")
+    parser.add_argument("-Z", "--exclude-retweets-self", action="store_true",
+                        default=False,
+                        help="Exclude retweets of self, default: include.")
+    return parser.parse_args()
+
+def validate_options():
+    """Validate options"""
+    if (ARGS.end_date - ARGS.start_date).days < 0:
+        sys.stderr.write("Start date must be before end date.\n")
+        sys.exit(1)
+
+def read_users_file(file):
+    """Read users from file"""
+    try:
+        with open(file) as config:
+            users = config.readlines()
+        return [user.strip() for user in users if not user.startswith("#")]
+    except Exception as error:  # pylint: disable=broad-except
+        sys.stderr.write("Failed to read users file '%s': %s.\n" % (file, error.args[1]))
+        sys.exit(1)
+
+
+#
+# Helper functions
+#
+def escape_xml(string):
+    """Escale XML text string"""
+    return string.replace("&", "&amp;").replace("<", "&lt;")
+
+def setup_twint(user, store, retweets):
+    """Read users' tweets"""
+    config = twint.Config()
+    config.Debug = False
+    config.Hide_output = True
+    config.Profile_full = False
+    config.Retries_count = ARGS.retries
+    config.Store_object = True
+    config.Store_object_tweets_list = store
+    config.Native_retweets = retweets
+    config.Limit = ARGS.tweet_limit
+    config.Since = str(ARGS.start_date)
+    config.Until = str(ARGS.end_date)
+    config.Username = user
+    return config
+
+def tweeter_displayname(user, tweets):
+    """Get tweeter's displayname"""
+    for tweet in tweets:
+        if tweet.username.lower() == user.lower():
+            return tweet.name
+    return user
+
+def tweet_linkify(tweet):
+    """Linkify tweet"""
+    def s(l):  # pylint: disable=invalid-name
+        """Sorting helper"""
+        return sorted(l, key=len, reverse=True)
+    pic_link = '<p><a shref="$SRC"><img alt="" src="$SRC" /></a></p>'
+    vid_link = '<p><a href="https://$SRC">https://$SRC</a></p>'
+    href_link = '<p><a href="$URL">$URL</a></p>'
+    user_link = ' <a href="https://twitter.com/$USER">@$USER</a>'
+    cashtag_link = '<a href="https://twitter.com/search?q=$CASH&src=cashtag_click">$CASH</a>'
+    hashtag_link = '<a href="https://twitter.com/hashtag/HASH">#HASH</a>'
+    # Remove invisible characters seen occasionally causing \s to fail
+    if '\u2066' in tweet.tweet:
+        tweet.tweet = tweet.tweet.replace('\u2066', '').replace('\u2069', '')
+    for url in set(tweet.urls + s(re.findall(r"https?:[-0-9a-zA-Z._=/?]+", tweet.tweet))):
+        tweet.tweet = tweet.tweet.replace(url, href_link.replace("$URL", url))
+    for user in s(re.findall(r"(?:^|\s|\.|\()@\w+", tweet.tweet)):
+        tweet.tweet = tweet.tweet.replace(user,
+                                          user_link.replace("$USER", user[user.index("@")+1:]))
+    for cashtag in s(set(re.findall(r"\$[a-zA-Z_=]+", tweet.tweet))):
+        if re.findall(r"https?:[-0-9a-zA-Z._=/?]+" + cashtag, tweet.tweet):
+            continue
+        pattern = re.escape(cashtag) + r"\b"
+        tweet.tweet = re.sub(pattern, cashtag_link.replace("$CASH", cashtag.upper()), tweet.tweet)
+    for hashtag in s(set(re.findall(r"\#\w+", tweet.tweet))):
+        if len(hashtag) < 3 or re.findall(r"https?:[-0-9a-zA-Z._=/?]+" + hashtag, tweet.tweet):
+            continue
+        pattern = re.escape(hashtag) + r"\b"
+        tweet.tweet = re.sub(pattern, hashtag_link.replace("HASH", hashtag[1:]), tweet.tweet)
+    for i, pic in enumerate(re.findall(r"pic.twitter.com/[0-9a-zA-Z_-]+", tweet.tweet)):
+        if len(tweet.photos) <= i:
+            tweet.tweet = tweet.tweet.replace(pic, vid_link.replace("$SRC", pic))
+        else:
+            tweet.tweet = tweet.tweet.replace(pic, pic_link.replace("$SRC", tweet.photos[i]))
+    return tweet.tweet.replace("\n", " ").replace(" …", "").strip()
+
+def tweet_timestamp(tweet):
+    """Get tweet timestamp"""
+    tweeted = tweet.datestamp + " " + tweet.timestamp
+    return datetime.strptime(tweeted, "%Y-%m-%d %H:%M:%S")
+
+def write_rss_file(rss_file, content):
+    """Write RSS file"""
+    try:
+        new_file = rss_file + ".tmp"
+        with open(new_file, 'w+') as output:
+            output.write(content)
+        need_update = True
+        if not ARGS.force_write and os.path.exists(rss_file):
+            if os.path.getsize(new_file) == os.path.getsize(rss_file):
+                if open(new_file, 'r').read() == open(rss_file, 'r').read():
+                    os.remove(new_file)
+                    need_update = False
+        if need_update:
+            os.replace(new_file, rss_file)
+    except Exception as error:  # pylint: disable=broad-except
+        sys.stderr.write("Failed to write RSS file '%s': %s.\n" % (rss_file, error.args[1]))
+
+
+#
+# Action functions
+#
+def read_tweets(users):  # pylint: disable=too-many-branches
+    """Read users' tweets"""
+    results = OrderedDict()
+    for user in users:
+        tweets = []
+        own_new_tweet_ids = []
+        if not ARGS.exclude_tweets:
+            twint.run.Search(setup_twint(user, tweets, False))
+            if ARGS.exclude_replies or ARGS.exclude_replies_self or ARGS.exclude_replies_others:
+                for tweet in list(tweets):
+                    if tweet.link.endswith(tweet.conversation_id):
+                        own_new_tweet_ids.append(tweet.conversation_id)
+            if ARGS.exclude_replies:
+                for tweet in list(tweets):
+                    if not tweet.link.endswith(tweet.conversation_id):
+                        tweets.remove(tweet)
+            if not ARGS.exclude_replies and ARGS.exclude_replies_self:
+                for tweet in list(tweets):
+                    if tweet.reply_to['user_id'] and \
+                       tweet.user_id == tweet.reply_to['user_id']:
+                        tweets.remove(tweet)
+            if not ARGS.exclude_replies and ARGS.exclude_replies_others:
+                for tweet in list(tweets):
+                    if tweet.reply_to['user_id'] and \
+                       tweet.user_id != tweet.reply_to['user_id'] or \
+                       tweet.conversation_id not in own_new_tweet_ids:
+                        tweets.remove(tweet)
+        if not ARGS.exclude_retweets:
+            retweets = []
+            twint.run.Search(setup_twint(user, retweets, True))
+            if ARGS.exclude_retweets_self:
+                for tweet in list(retweets):
+                    if tweet.tweet.startswith("RT @" + user):
+                        retweets.remove(tweet)
+            tweets += retweets
+        tweets.sort(key=tweet_timestamp, reverse=True)
+        results[user] = tweets[:ARGS.display_limit]
+    return results
+
+def write_rss(tweets):
+    """Write RSS"""
+    rss_header = '<?xml version="1.0" encoding="UTF-8" ?>\n<rss version="2.0">\n'
+    rss_header += '  <channel>\n    <title>$TITLE</title>\n    <link>$LINK</link>\n'
+    rss_header += '    <description>$DESC</description>\n'
+    rss_item = '    <item>\n      <title>$TITLE</title>\n'
+    rss_item += '      <link>$LINK</link>\n'
+    rss_item += '      <pubDate>$DATE</pubDate>\n'
+    rss_item += '      <description>$DESC</description>\n'
+    rss_item += '    </item>\n'
+    rss_footer = '  </channel>\n</rss>\n'
+    for user in tweets:
+        if not tweets[user]:
+            continue
+        displayname = escape_xml(tweeter_displayname(user, tweets[user]))
+        base_path = RSS_BASE_PATH if RSS_BASE_PATH.endswith("/") else RSS_BASE_PATH + "/"
+        rss_file = os.path.expanduser(base_path + user + ".xml")
+        header = rss_header.replace("$TITLE", displayname  + " / Twitter")
+        header = header.replace("$LINK", "https://twitter.com/" + user)
+        header = header.replace("$DESC", displayname + "'s recent tweets")
+        items = ""
+        for tweet in tweets[user]:
+            item = rss_item.replace("$TITLE",
+                                    escape_xml(tweet.name) + " " + \
+                                    tweet.username + " " + \
+                                    tweet.datestamp)
+            item = item.replace("$LINK", escape_xml(tweet.link))
+            local_tz = str(datetime.now().astimezone())[-6:].replace(":", "")
+            tweet_date = tweet_timestamp(tweet).strftime("%a, %d %b %Y %H:%M:%S " + local_tz)
+            item = item.replace("$DATE", tweet_date)
+            item = item.replace("$DESC", escape_xml(tweet_linkify(tweet)))
+            items += item
+        content = header + items + rss_footer
+        if ARGS.debug:
+            sys.stdout.write(content)
+            continue
+        write_rss_file(rss_file, content)
+
+
+#
+# Tool main function
+#
+def tweets2rss():
+    """Tweets to RSS"""
+    global ARGS  # pylint: disable=global-statement
+    ARGS = parse_args()
+    validate_options()
+
+    users = read_users_file(os.path.expanduser(ARGS.users_file))
+
+    write_rss(read_tweets(users))
+
+
+if __name__ == '__main__':
+    try:
+        tweets2rss()
+    except OSError as error:
+        if error.errno != errno.EPIPE:
+            sys.stderr.write("%s\n" % str(error))
+            sys.exit(1)
+    except KeyboardInterrupt:
+        sys.stdout.write("\n")
