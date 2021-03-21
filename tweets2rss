@@ -248,6 +248,7 @@ def read_tweets(users):  # pylint: disable=too-many-branches
 
 def write_rss(tweets):
     """Write RSS"""
+    local_tz = str(datetime.now().astimezone())[-6:].replace(":", "")
     rss_header = '<?xml version="1.0" encoding="UTF-8" ?>\n<rss version="2.0">\n'
     rss_header += '  <channel>\n    <title>$TITLE</title>\n    <link>$LINK</link>\n'
     rss_header += '    <description>$DESC</description>\n'
@@ -259,6 +260,11 @@ def write_rss(tweets):
     rss_footer = '  </channel>\n</rss>\n'
     for user in tweets:
         if not tweets[user]:
+            continue
+        if ARGS.debug:
+            for tweet in tweets[user]:
+                tweet_date = tweet_timestamp(tweet).strftime("%Y-%m-%d %H:%M:%S")
+                sys.stdout.write(tweet_date + " - <" + user + "> " + str(tweet.tweet) + "\n")
             continue
         displayname = escape_xml(tweeter_displayname(user, tweets[user]))
         base_path = RSS_BASE_PATH if RSS_BASE_PATH.endswith("/") else RSS_BASE_PATH + "/"
@@ -273,15 +279,11 @@ def write_rss(tweets):
                                     tweet.username + " " + \
                                     tweet.datestamp)
             item = item.replace("$LINK", escape_xml(tweet.link))
-            local_tz = str(datetime.now().astimezone())[-6:].replace(":", "")
             tweet_date = tweet_timestamp(tweet).strftime("%a, %d %b %Y %H:%M:%S " + local_tz)
             item = item.replace("$DATE", tweet_date)
             item = item.replace("$DESC", escape_xml(tweet_linkify(tweet)))
             items += item
         content = header + items + rss_footer
-        if ARGS.debug:
-            sys.stdout.write(content)
-            continue
         write_rss_file(rss_file, content)
 
 
