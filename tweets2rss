@@ -214,7 +214,14 @@ def read_tweets(users):  # pylint: disable=too-many-branches
         tweets = []
         own_new_tweet_ids = []
         if not ARGS.exclude_tweets:
-            twint.run.Search(setup_twint(user, tweets, False))
+            try:
+                sys.stdout = open("/dev/null", "w")
+                twint.run.Search(setup_twint(user, tweets, False))
+                sys.stdout = open("/dev/stdout", "w")
+            except Exception as error:  # pylint: disable=broad-except
+                sys.stderr.write("twint failed to scrape '%s': %s.\n" % (user, error.args[1]))
+                sys.stdout = open("/dev/stdout", "w")
+                continue
             if ARGS.exclude_replies or ARGS.exclude_replies_self or ARGS.exclude_replies_others:
                 for tweet in list(tweets):
                     if tweet.link.endswith(tweet.conversation_id):
@@ -236,7 +243,14 @@ def read_tweets(users):  # pylint: disable=too-many-branches
                         tweets.remove(tweet)
         if not ARGS.exclude_retweets:
             retweets = []
-            twint.run.Search(setup_twint(user, retweets, True))
+            try:
+                sys.stdout = open("/dev/null", "w")
+                twint.run.Search(setup_twint(user, retweets, True))
+                sys.stdout = open("/dev/stdout", "w")
+            except Exception:  # pylint: disable=broad-except
+                sys.stderr.write("twint failed to scrape '%s': %s.\n" % (user, error.args[1]))
+                sys.stdout = open("/dev/stdout", "w")
+                continue
             if ARGS.exclude_retweets_self:
                 for tweet in list(retweets):
                     if tweet.tweet.startswith("RT @" + user):
