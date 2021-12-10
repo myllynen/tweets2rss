@@ -247,8 +247,8 @@ def read_tweets(users):  # pylint: disable=too-many-branches
                 sys.stdout = open("/dev/null", "w")
                 twint.run.Search(setup_twint(user, retweets, True))
                 sys.stdout = open("/dev/stdout", "w")
-            except Exception:  # pylint: disable=broad-except
-                sys.stderr.write("twint failed to scrape '%s': %s.\n" % (user, error.args[1]))
+            except Exception as error:  # pylint: disable=broad-except
+                sys.stderr.write("twint failed to scrape '%s': %s.\n" % (user, str(error)))
                 sys.stdout = open("/dev/stdout", "w")
                 continue
             if ARGS.exclude_retweets_self:
