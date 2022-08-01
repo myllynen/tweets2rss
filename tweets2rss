@@ -237,9 +237,7 @@ def read_tweets(users):  # pylint: disable=too-many-branches
                         tweets.remove(tweet)
             if not ARGS.exclude_replies and ARGS.exclude_replies_others:
                 for tweet in list(tweets):
-                    if tweet.reply_to['user_id'] and \
-                       tweet.user_id != tweet.reply_to['user_id'] or \
-                       tweet.conversation_id not in own_new_tweet_ids:
+                    if tweet.reply_to and tweet.user_id not in [x['id'] for x in tweet.reply_to]:
                         tweets.remove(tweet)
         if not ARGS.exclude_retweets:
             retweets = []
