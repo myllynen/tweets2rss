@@ -9,20 +9,20 @@ A simple Python script to generate RSS feeds from Twitter feeds.
 
 This tool is provided for educational purposes only.
 
-Please read and comply with [Twitter Terms of Service](https://twitter.com/en/tos)
+Please read and comply with
+[Twitter Terms of Service](https://twitter.com/en/tos)
 before downloading or using this tool.
 
 ## Requirements
 
 * [Python 3](https://www.python.org/)
-* [Twint](https://github.com/twintproject/twint)
-  * Use [pip](https://pypi.org/project/pip/) to install the latest version,
-    (and in case it is not recent enough, use the latest code from their repo)
-    * `pip install --user --upgrade twint`
+* [Twint](https://github.com/twintproject/twint) (maintained version)
+  * Use [pip](https://pypi.org/project/pip/) to install a known-good fork:
+    * `pip install --user --upgrade git+https://github.com/twintproject/twint.git@origin/master#egg=twint`
 
 ## Usage
 
-1. Ensure twint is working as expected
+1. Ensure twint is working as expected - this is a must!
   ```
   twint -u jack
   ```
@@ -30,9 +30,9 @@ before downloading or using this tool.
   ```
   mkdir ~/.rss
   ```
-3. Create configuration on whom to follow
+3. Create configuration of feeds to follow
   ```
-  echo jack > ~/.rss/users.txt
+  echo jack >> ~/.rss/users.txt
   ```
 4. Run the tool
   ```
@@ -53,7 +53,7 @@ An example of [crontab](https://man7.org/linux/man-pages/man5/crontab.5.html)
 entries:
 
 ```Shell
-@reboot $HOME/.local/bin/rssserver
+@reboot   $HOME/.local/bin/rssserver
 5 * * * * $HOME/.local/bin/tweets2rss -Y -Z -u $HOME/.rss/users.txt > /dev/null 2>&1
 5 * * * * $HOME/.local/bin/tweets2rss -Y -z -u $HOME/.rss/users-no-rt.txt > /dev/null 2>&1
 ```
