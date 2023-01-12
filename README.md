@@ -18,7 +18,7 @@ before downloading or using this tool.
 * [Python 3](https://www.python.org/)
 * [Twint](https://github.com/twintproject/twint) (maintained version)
   * Use [pip](https://pypi.org/project/pip/) to install a known-good fork:
-    * `pip install --user --upgrade git+https://github.com/twintproject/twint.git@origin/master#egg=twint`
+    * `pip install --user --upgrade "git+https://github.com/twintproject/twint.git@origin/master#egg=twint"`
 
 ## Usage
 
